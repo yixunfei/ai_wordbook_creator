@@ -68,6 +68,11 @@ public class WordbookGenFrame extends JFrame {
 
     private static final int DEFAULT_BATCH_SIZE = 12;
     private static final int DEFAULT_TIMEOUT_SEC = 180;
+    private static final int LOG_PANEL_EXPANDED_HEIGHT = 220;
+    private static final int LOG_PANEL_COLLAPSED_HEIGHT = 54;
+    private static final Color APP_BACKGROUND = new Color(244, 247, 251);
+    private static final Color CARD_BACKGROUND = Color.WHITE;
+    private static final Color SOFT_BORDER = new Color(218, 226, 236);
 
     /**
      * 内置脚本根目录。
@@ -116,8 +121,11 @@ public class WordbookGenFrame extends JFrame {
 
     private final JCheckBox allowNonStandardResponsesCheck = new JCheckBox(
             "\u517c\u5bb9\u975e\u6807\u51c6 Provider \u8fd4\u56de", true);
+    private final JCheckBox autoContinueTruncatedCheck = new JCheckBox(
+            "\u8fd4\u56de\u88ab\u622a\u65ad\u65f6\u81ea\u52a8\u7eed\u5199", false);
 
     private final JTextArea logArea = new JTextArea();
+    private final JButton toggleLogPanelButton = new JButton("\u6536\u8d77\u65e5\u5fd7");
     private final JProgressBar progressBar = new JProgressBar();
     private final JLabel statusLabel = new JLabel("状态: IDLE");
 
@@ -126,6 +134,11 @@ public class WordbookGenFrame extends JFrame {
 
     private AdvancedSettingsState advancedSettings = AdvancedSettingsState.defaultState();
     private ProviderCard draggingCard;
+    private JSplitPane mainSplitPane;
+    private JPanel logPanel;
+    private JScrollPane logScrollPane;
+    private boolean logPanelCollapsed = false;
+    private int lastExpandedDividerLocation = -1;
 
     public WordbookGenFrame() {
         super("WordbookGen - AI 单词本生成器");
@@ -135,28 +148,59 @@ public class WordbookGenFrame extends JFrame {
         setLocationRelativeTo(null);
 
         initUi();
+        applyNaturalUiText();
         bindActions();
         applySettings(configStore.load().orElseGet(this::defaultSettings));
         updateButtons(JobState.IDLE);
     }
 
+    private void applyNaturalUiText() {
+        setTitle("AI Wordbook Creator");
+        startButton.setText("\u5f00\u59cb\u751f\u6210");
+        pauseButton.setText("\u6682\u505c");
+        resumeButton.setText("\u7ee7\u7eed");
+        stopButton.setText("\u505c\u6b62");
+        saveConfigButton.setText("\u4fdd\u5b58\u914d\u7f6e");
+        loadConfigButton.setText("\u52a0\u8f7d\u914d\u7f6e");
+        addProviderButton.setText("\u6dfb\u52a0 Provider");
+        advancedSettingsButton.setText("\u9ad8\u7ea7\u8bbe\u7f6e");
+        resumeCheck.setText("\u65ad\u70b9\u7eed\u4f20");
+        clearCheckpointCheck.setText("\u6210\u529f\u540e\u6e05\u7406\u65ad\u70b9\u6587\u4ef6");
+        allowNonStandardResponsesCheck.setText("\u517c\u5bb9\u975e\u6807\u51c6 Provider \u8fd4\u56de");
+        autoContinueTruncatedCheck.setText("\u8fd4\u56de\u88ab\u622a\u65ad\u65f6\u81ea\u52a8\u7eed\u5199");
+        autoFetchModelsAfterTestCheck.setText("\u6d4b\u8bd5\u6210\u529f\u540e\u81ea\u52a8\u5237\u65b0\u6a21\u578b");
+        statusLabel.setText("\u72b6\u6001: IDLE");
+        resumeCheck.setOpaque(false);
+        clearCheckpointCheck.setOpaque(false);
+        allowNonStandardResponsesCheck.setOpaque(false);
+        autoContinueTruncatedCheck.setOpaque(false);
+        autoFetchModelsAfterTestCheck.setOpaque(false);
+        toggleLogPanelButton.setText("\u6536\u8d77\u65e5\u5fd7");
+
+        allowNonStandardResponsesCheck.setToolTipText("\u517c\u5bb9\u76f4\u63a5 JSON\u3001output_text \u7b49\u975e\u6807\u51c6\u8fd4\u56de\u3002\u5173\u95ed\u540e\u4ec5\u63a5\u53d7\u6807\u51c6 Chat Completions \u7ed3\u6784\u3002");
+        autoContinueTruncatedCheck.setToolTipText("\u9ed8\u8ba4\u5173\u95ed\u3002\u5f53 finish_reason=length \u65f6\u5c1d\u8bd5\u8ffd\u52a0\u8bf7\u6c42\u7eed\u5199\u5269\u4f59 JSON\u3002");
+        toggleLogPanelButton.setToolTipText("\u6536\u8d77\u6216\u5c55\u5f00\u5e95\u90e8\u8fd0\u884c\u65e5\u5fd7");
+    }
+
     private void initUi() {
         setLayout(new BorderLayout(8, 8));
+        getContentPane().setBackground(APP_BACKGROUND);
         add(createToolbarPanel(), BorderLayout.NORTH);
 
-        JSplitPane splitPane = new JSplitPane(JSplitPane.VERTICAL_SPLIT);
-        splitPane.setResizeWeight(0.78);
-        splitPane.setContinuousLayout(true);
-        splitPane.setOneTouchExpandable(true);
+        mainSplitPane = new JSplitPane(JSplitPane.VERTICAL_SPLIT);
+        mainSplitPane.setResizeWeight(0.78);
+        mainSplitPane.setContinuousLayout(true);
+        mainSplitPane.setOneTouchExpandable(true);
 
         JScrollPane configScrollPane = new JScrollPane(createConfigContainer());
         configScrollPane.getVerticalScrollBar().setUnitIncrement(16);
-        splitPane.setTopComponent(configScrollPane);
-        splitPane.setBottomComponent(createLogPanel());
-        add(splitPane, BorderLayout.CENTER);
+        mainSplitPane.setTopComponent(configScrollPane);
+        mainSplitPane.setBottomComponent(createNaturalLogPanel());
+        add(mainSplitPane, BorderLayout.CENTER);
 
         SwingUtilities.invokeLater(() -> {
-            splitPane.setDividerLocation(0.78);
+            mainSplitPane.setDividerLocation(0.78);
+            applyLogPanelState(false);
             configScrollPane.getViewport().setViewPosition(new Point(0, 0));
         });
     }
@@ -170,8 +214,10 @@ public class WordbookGenFrame extends JFrame {
 
     private JPanel createToolbarPanel() {
         JPanel panel = new JPanel(new BorderLayout());
+        panel.setBackground(APP_BACKGROUND);
 
         JPanel left = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        left.setOpaque(false);
         left.add(startButton);
         left.add(pauseButton);
         left.add(resumeButton);
@@ -183,6 +229,7 @@ public class WordbookGenFrame extends JFrame {
         left.add(loadConfigButton);
 
         JPanel right = new JPanel(new FlowLayout(FlowLayout.RIGHT));
+        right.setOpaque(false);
         progressBar.setStringPainted(true);
         progressBar.setPreferredSize(new Dimension(380, 26));
         right.add(progressBar);
@@ -191,12 +238,13 @@ public class WordbookGenFrame extends JFrame {
 
         panel.add(left, BorderLayout.WEST);
         panel.add(right, BorderLayout.EAST);
-        panel.setBorder(BorderFactory.createEmptyBorder(6, 6, 6, 6));
+        panel.setBorder(BorderFactory.createEmptyBorder(10, 10, 4, 10));
         return panel;
     }
 
     private JPanel createConfigContainer() {
         JPanel container = new JPanel(new GridBagLayout());
+        container.setBackground(APP_BACKGROUND);
         GridBagConstraints c = new GridBagConstraints();
         c.gridx = 0;
         c.weightx = 1;
@@ -205,14 +253,14 @@ public class WordbookGenFrame extends JFrame {
 
         c.gridy = 0;
         c.weighty = 0;
-        container.add(createProviderPanel(), c);
+        container.add(createNaturalProviderPanel(), c);
 
         c.gridy = 1;
-        container.add(createPathAndOptionsPanel(), c);
+        container.add(createNaturalPathAndOptionsPanel(), c);
 
         c.gridy = 2;
         c.insets = new Insets(0, 0, 0, 0);
-        container.add(createPromptPanel(), c);
+        container.add(createNaturalPromptPanel(), c);
 
         // 占位行用于把内容顶到上方，避免 BoxLayout 弹性拉伸导致的空白区域。
         c.gridy = 3;
@@ -220,6 +268,210 @@ public class WordbookGenFrame extends JFrame {
         c.fill = GridBagConstraints.BOTH;
         container.add(new JPanel(), c);
         return container;
+    }
+
+    private JPanel createNaturalPathAndOptionsPanel() {
+        JPanel panel = new JPanel(new GridBagLayout());
+        applySectionStyle(panel, "\u8f93\u5165\u8f93\u51fa\u4e0e\u8fd0\u884c\u9009\u9879");
+
+        GridBagConstraints c = new GridBagConstraints();
+        c.insets = new Insets(6, 8, 6, 8);
+        c.fill = GridBagConstraints.HORIZONTAL;
+        int row = 0;
+
+        addPathRow(panel, c, row++, "\u8f93\u5165\u5355\u8bcd\u6587\u4ef6", inputPathField,
+                "\u9009\u62e9", this::chooseInputFile);
+        addPathRow(panel, c, row++, "\u8f93\u51fa\u6587\u4ef6", outputPathField,
+                "\u9009\u62e9", this::chooseOutputFile);
+        addPathRow(panel, c, row++, "\u914d\u7f6e\u6587\u4ef6\u5939", configDirectoryField,
+                browseConfigDirectoryButton, this::chooseConfigDirectory);
+
+        addLabeledComponent(panel, c, row, 0, "\u8f93\u51fa\u683c\u5f0f", outputFormatCombo, 1);
+        addLabeledComponent(panel, c, row++, 2, "\u6587\u4ef6\u7f16\u7801", encodingCombo, 1);
+        addLabeledComponent(panel, c, row, 0, "\u6e90\u8bed\u8a00", sourceLangField, 1);
+        addLabeledComponent(panel, c, row++, 2, "\u91ca\u4e49\u8bed\u8a00", targetLangField, 1);
+        addLabeledComponent(panel, c, row, 0, "\u6279\u5927\u5c0f", batchSizeSpinner, 1);
+        addLabeledComponent(panel, c, row++, 2, "\u5e76\u53d1\u6570", parallelismSpinner, 1);
+        addLabeledComponent(panel, c, row, 0, "\u91cd\u8bd5\u6b21\u6570", retriesSpinner, 1);
+        addLabeledComponent(panel, c, row++, 2, "\u8bf7\u6c42\u8d85\u65f6(\u79d2)", timeoutSpinner, 1);
+
+        JPanel switches = new JPanel(new FlowLayout(FlowLayout.LEFT, 12, 0));
+        switches.setOpaque(false);
+        switches.add(resumeCheck);
+        switches.add(clearCheckpointCheck);
+        switches.add(allowNonStandardResponsesCheck);
+        switches.add(autoContinueTruncatedCheck);
+        c.gridx = 0;
+        c.gridy = row;
+        c.gridwidth = 4;
+        c.weightx = 1;
+        panel.add(switches, c);
+        c.gridwidth = 1;
+        return panel;
+    }
+
+    private void addPathRow(
+            JPanel panel,
+            GridBagConstraints c,
+            int row,
+            String label,
+            JTextField field,
+            String buttonText,
+            Runnable action
+    ) {
+        addPathRow(panel, c, row, label, field, new JButton(buttonText), action);
+    }
+
+    private void addPathRow(
+            JPanel panel,
+            GridBagConstraints c,
+            int row,
+            String label,
+            JTextField field,
+            JButton button,
+            Runnable action
+    ) {
+        c.gridy = row;
+        c.gridx = 0;
+        c.weightx = 0;
+        panel.add(new JLabel(label), c);
+        c.gridx = 1;
+        c.gridwidth = 2;
+        c.weightx = 1;
+        panel.add(field, c);
+        c.gridx = 3;
+        c.gridwidth = 1;
+        c.weightx = 0;
+        button.addActionListener(e -> action.run());
+        panel.add(button, c);
+    }
+
+    private void addLabeledComponent(
+            JPanel panel,
+            GridBagConstraints c,
+            int row,
+            int column,
+            String label,
+            java.awt.Component component,
+            int componentWidth
+    ) {
+        c.gridy = row;
+        c.gridx = column;
+        c.gridwidth = 1;
+        c.weightx = 0;
+        panel.add(new JLabel(label), c);
+        c.gridx = column + 1;
+        c.gridwidth = componentWidth;
+        c.weightx = 1;
+        panel.add(component, c);
+        c.gridwidth = 1;
+    }
+
+    private JPanel createNaturalProviderPanel() {
+        JPanel panel = new JPanel(new BorderLayout(8, 8));
+        applySectionStyle(panel, "Provider \u914d\u7f6e");
+
+        JPanel topBar = new JPanel(new BorderLayout());
+        topBar.setOpaque(false);
+        topBar.add(new JLabel("\u6309\u987a\u5e8f\u8f6e\u8be2 Provider\uff0c\u53ef\u6d4b\u8bd5\u8fde\u901a\u6027\u5e76\u81ea\u52a8\u5237\u65b0\u6a21\u578b\u5217\u8868"),
+                BorderLayout.WEST);
+        JPanel rightActions = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
+        rightActions.setOpaque(false);
+        rightActions.add(autoFetchModelsAfterTestCheck);
+        rightActions.add(addProviderButton);
+        topBar.add(rightActions, BorderLayout.EAST);
+        panel.add(topBar, BorderLayout.NORTH);
+
+        providersListPanel.setLayout(new BoxLayout(providersListPanel, BoxLayout.Y_AXIS));
+        providersListPanel.setBackground(CARD_BACKGROUND);
+        JScrollPane scrollPane = new JScrollPane(providersListPanel);
+        scrollPane.setPreferredSize(new Dimension(10, 280));
+        panel.add(scrollPane, BorderLayout.CENTER);
+        return panel;
+    }
+
+    private JPanel createNaturalPromptPanel() {
+        JPanel panel = new JPanel(new BorderLayout(8, 8));
+        applySectionStyle(panel, "\u8865\u5145\u63d0\u793a\u8bcd");
+        promptArea.setLineWrap(true);
+        promptArea.setWrapStyleWord(true);
+        panel.add(new JScrollPane(promptArea), BorderLayout.CENTER);
+        return panel;
+    }
+
+    private JPanel createNaturalLogPanel() {
+        logPanel = new JPanel(new BorderLayout(8, 8));
+        applySectionStyle(logPanel, "\u8fd0\u884c\u65e5\u5fd7");
+        logArea.setEditable(false);
+        logArea.setLineWrap(true);
+        logArea.setWrapStyleWord(true);
+        logScrollPane = new JScrollPane(logArea);
+
+        JPanel header = new JPanel(new BorderLayout());
+        header.setOpaque(false);
+        JLabel hintLabel = new JLabel("\u53ef\u968f\u65f6\u6536\u8d77\uff0c\u4fdd\u6301\u5e95\u90e8\u89c6\u56fe\u7b80\u6d01");
+        hintLabel.setForeground(new Color(108, 116, 130));
+        header.add(hintLabel, BorderLayout.WEST);
+        header.add(toggleLogPanelButton, BorderLayout.EAST);
+
+        logPanel.add(header, BorderLayout.NORTH);
+        logPanel.add(logScrollPane, BorderLayout.CENTER);
+        logPanel.setPreferredSize(new Dimension(10, LOG_PANEL_EXPANDED_HEIGHT));
+        return logPanel;
+    }
+
+    private void applySectionStyle(JPanel panel, String title) {
+        panel.setBackground(CARD_BACKGROUND);
+        panel.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createTitledBorder(BorderFactory.createLineBorder(SOFT_BORDER), title),
+                BorderFactory.createEmptyBorder(4, 6, 6, 6)));
+    }
+
+    private void toggleLogPanel() {
+        if (!logPanelCollapsed && mainSplitPane != null) {
+            lastExpandedDividerLocation = mainSplitPane.getDividerLocation();
+        }
+        logPanelCollapsed = !logPanelCollapsed;
+        applyLogPanelState(true);
+    }
+
+    private void applyLogPanelState(boolean adjustDivider) {
+        if (logPanel == null || logScrollPane == null) {
+            return;
+        }
+
+        logScrollPane.setVisible(!logPanelCollapsed);
+        toggleLogPanelButton.setText(logPanelCollapsed ? "\u5c55\u5f00\u65e5\u5fd7" : "\u6536\u8d77\u65e5\u5fd7");
+        logPanel.setPreferredSize(new Dimension(
+                10,
+                logPanelCollapsed ? LOG_PANEL_COLLAPSED_HEIGHT : LOG_PANEL_EXPANDED_HEIGHT));
+        logPanel.revalidate();
+        logPanel.repaint();
+
+        if (!adjustDivider || mainSplitPane == null) {
+            return;
+        }
+
+        SwingUtilities.invokeLater(() -> {
+            if (logPanelCollapsed) {
+                int target = Math.max(
+                        140,
+                        mainSplitPane.getHeight() - LOG_PANEL_COLLAPSED_HEIGHT - mainSplitPane.getDividerSize());
+                mainSplitPane.setDividerLocation(target);
+                return;
+            }
+
+            // Prefer restoring the user's previous expanded height before falling back to the default size.
+            if (lastExpandedDividerLocation > 0 && lastExpandedDividerLocation < mainSplitPane.getHeight()) {
+                mainSplitPane.setDividerLocation(lastExpandedDividerLocation);
+                return;
+            }
+
+            int target = Math.max(
+                    140,
+                    mainSplitPane.getHeight() - LOG_PANEL_EXPANDED_HEIGHT - mainSplitPane.getDividerSize());
+            mainSplitPane.setDividerLocation(target);
+        });
     }
 
     private JPanel createPathAndOptionsPanel() {
@@ -378,6 +630,7 @@ public class WordbookGenFrame extends JFrame {
         loadConfigButton.addActionListener(e -> onLoadConfig());
         addProviderButton.addActionListener(e -> addProviderCard(defaultProviderItem(), providerCards.size()));
         advancedSettingsButton.addActionListener(e -> openAdvancedSettingsDialog());
+        toggleLogPanelButton.addActionListener(e -> toggleLogPanel());
     }
 
     private void onStart() {
@@ -388,6 +641,7 @@ public class WordbookGenFrame extends JFrame {
                     + ", timeoutSec=" + config.requestTimeout().toSeconds()
                     + ", debugMode=" + config.debugMode()
                     + ", allowNonStandardResponses=" + config.allowNonStandardResponses()
+                    + ", autoContinueTruncatedOutput=" + config.autoContinueTruncatedOutput()
                     + ", providers=" + config.providers().size());
             engine.start(config, uiListener());
             appendLog("任务已启动。");
@@ -466,6 +720,7 @@ public class WordbookGenFrame extends JFrame {
                 .resumeFromCheckpoint(resumeCheck.isSelected())
                 .clearCheckpointOnSuccess(clearCheckpointCheck.isSelected())
                 .allowNonStandardResponses(allowNonStandardResponsesCheck.isSelected())
+                .autoContinueTruncatedOutput(autoContinueTruncatedCheck.isSelected())
                 .useSystemPromptOverride(advancedSettings.useSystemPromptOverride)
                 .systemPromptTemplate(advancedSettings.systemPromptTemplate)
                 .preRequestHook(preHook)
@@ -799,6 +1054,7 @@ public class WordbookGenFrame extends JFrame {
         configDirectoryField.setEnabled(!active);
         browseConfigDirectoryButton.setEnabled(!active);
         allowNonStandardResponsesCheck.setEnabled(!active);
+        autoContinueTruncatedCheck.setEnabled(!active);
 
         for (ProviderCard card : providerCards) {
             card.setEditable(!active);
@@ -828,6 +1084,7 @@ public class WordbookGenFrame extends JFrame {
         settings.resumeFromCheckpoint = resumeCheck.isSelected();
         settings.clearCheckpointOnSuccess = clearCheckpointCheck.isSelected();
         settings.allowNonStandardResponses = allowNonStandardResponsesCheck.isSelected();
+        settings.autoContinueTruncatedOutput = autoContinueTruncatedCheck.isSelected();
 
         settings.useSystemPromptOverride = advancedSettings.useSystemPromptOverride;
         settings.systemPromptTemplate = advancedSettings.systemPromptTemplate;
@@ -890,6 +1147,7 @@ public class WordbookGenFrame extends JFrame {
         resumeCheck.setSelected(settings.resumeFromCheckpoint);
         clearCheckpointCheck.setSelected(settings.clearCheckpointOnSuccess);
         allowNonStandardResponsesCheck.setSelected(settings.allowNonStandardResponses);
+        autoContinueTruncatedCheck.setSelected(settings.autoContinueTruncatedOutput);
 
         advancedSettings = new AdvancedSettingsState();
         advancedSettings.useSystemPromptOverride = settings.useSystemPromptOverride;
@@ -913,6 +1171,7 @@ public class WordbookGenFrame extends JFrame {
         settings.outputFormat = "JSON";
         settings.encoding = "UTF-8";
         settings.allowNonStandardResponses = true;
+        settings.autoContinueTruncatedOutput = false;
         settings.useSystemPromptOverride = false;
         settings.systemPromptTemplate = "";
         settings.debugMode = false;
@@ -1274,10 +1533,13 @@ public class WordbookGenFrame extends JFrame {
         ProviderCard(UiProviderItem item) {
             setLayout(new BorderLayout());
             setBorder(BorderFactory.createLineBorder(BORDER_NORMAL, 1, true));
+            setBackground(CARD_BACKGROUND);
+            bodyPanel.setBackground(CARD_BACKGROUND);
 
             dragHandle.setCursor(Cursor.getPredefinedCursor(Cursor.MOVE_CURSOR));
             dragHandle.setForeground(new Color(68, 85, 102));
             summaryLabel.setForeground(new Color(102, 110, 125));
+            applyNaturalText();
 
             JPanel header = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 6));
             header.setBackground(HEADER_BG);
@@ -1298,6 +1560,15 @@ public class WordbookGenFrame extends JFrame {
             fill(item);
             bindActions();
             bindSummarySync();
+        }
+
+        private void applyNaturalText() {
+            dragHandle.setText("\u62d6\u52a8\u6392\u5e8f");
+            collapseButton.setText("\u6536\u8d77");
+            copyButton.setText("\u590d\u5236");
+            deleteButton.setText("\u5220\u9664");
+            testButton.setText("\u8fde\u63a5\u6d4b\u8bd5");
+            fetchModelsButton.setText("\u5237\u65b0\u6a21\u578b");
         }
 
         JLabel getDragHandle() {

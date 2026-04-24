@@ -89,6 +89,24 @@ public class WordbookJobEngine {
         runningFuture = supervisor.submit(() -> runInternal(config));
     }
 
+    /**
+     * Runs on the caller thread for CLI usage while sharing the same pause/stop and checkpoint path.
+     */
+    public void runBlocking(JobConfig config, JobListener listener) {
+        synchronized (this) {
+            if (config == null) {
+                throw new IllegalArgumentException("Job config is required.");
+            }
+            if (state == JobState.RUNNING || state == JobState.PAUSED || state == JobState.STOPPING) {
+                throw new IllegalStateException("Job is already active.");
+            }
+            this.listener = listener;
+            this.pauseController = new PauseController();
+            setState(JobState.RUNNING);
+        }
+        runInternal(config);
+    }
+
     public synchronized void pause() {
         if (state != JobState.RUNNING) {
             return;
@@ -128,6 +146,8 @@ public class WordbookJobEngine {
                     + ", parallelism=" + config.parallelism()
                     + ", timeoutSec=" + config.requestTimeout().toSeconds()
                     + ", debugMode=" + config.debugMode()
+                    + ", allowNonStandardResponses=" + config.allowNonStandardResponses()
+                    + ", autoContinueTruncatedOutput=" + config.autoContinueTruncatedOutput()
                     + ", providers=" + config.providers().size());
             if (config.debugMode() && (config.batchSize() > 1 || config.parallelism() > 1)) {
                 log("Debug tip: set batchSize=1 and parallelism=1 to get deterministic per-word logs.");

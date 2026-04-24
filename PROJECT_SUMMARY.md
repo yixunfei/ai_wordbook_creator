@@ -1,8 +1,8 @@
 # Project Summary / 项目概要
 
-WordbookGen is a Java 17 Swing desktop application for generating structured wordbook data from word lists through OpenAI-compatible LLM providers.
+WordbookGen is a Java 17 application for generating structured wordbook data from word lists through OpenAI-compatible LLM providers. It can run as a Swing desktop app or as a headless CLI for scripted jobs.
 
-WordbookGen 是一个 Java 17 Swing 桌面应用，用于通过兼容 OpenAI 协议的大模型 Provider，把单词列表生成结构化词书数据。
+WordbookGen 是一个 Java 17 应用，用于通过兼容 OpenAI 协议的大模型 Provider，把单词列表生成结构化词书数据。它既可以作为 Swing 桌面应用运行，也可以通过无界面 CLI 执行脚本化任务。
 
 ## Core Capabilities / 核心能力
 
@@ -12,8 +12,8 @@ WordbookGen 是一个 Java 17 Swing 桌面应用，用于通过兼容 OpenAI 协
 - 批量处理单词，支持重试、配额限制、断点续传、暂停、继续和停止。
 - Cancellable async HTTP requests on stop.
 - 停止任务时可取消正在执行的异步 HTTP 请求。
-- Strict or compatible provider response parsing.
-- 支持严格或兼容两种 Provider 响应解析模式。
+- Strict or compatible provider response parsing, plus optional truncated-output continuation.
+- 支持严格或兼容两种 Provider 响应解析模式，并提供默认关闭的截断自动续写。
 - JSON/CSV export using fixed dictionary fields.
 - 使用固定词典字段导出 JSON/CSV。
 - Script hooks for request, response, and parsed-result customization.
@@ -21,10 +21,11 @@ WordbookGen 是一个 Java 17 Swing 桌面应用，用于通过兼容 OpenAI 协
 - Config save/load from a default or selected folder.
 - 支持从默认目录或指定目录加载/保存配置。
 
-## Entry Point / 入口
+## Entry Points / 入口
 
 ```text
-com.wordbookgen.app.WordbookGenApplication
+UI:  com.wordbookgen.app.WordbookGenApplication
+CLI: java -jar target/wordbook-gen-1.0.0-shaded.jar --cli --help
 ```
 
 ## Build / 构建
@@ -45,5 +46,5 @@ target/wordbook-gen-1.0.0-shaded.jar
 - `.gitignore` 已排除密钥、本地配置、断点、输出文件、IDE 元数据和构建产物。
 - `ui-settings.json` can contain API keys and must not be committed.
 - `ui-settings.json` 可能包含 API Key，不能提交。
-- The project includes an MIT License.
-- 项目已包含 MIT License。
+- The project includes an MIT License and bilingual README/Summary documentation.
+- 项目已包含 MIT License，以及英汉双语 README 和概要文档。

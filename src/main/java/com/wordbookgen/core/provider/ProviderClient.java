@@ -49,10 +49,12 @@ import java.util.function.Consumer;
 
 /**
  * provider 客户端（OpenAI Chat Completions 兼容协议）。
+ * Owns request fallback, cancellable async HTTP calls, response extraction, and model-output repair.
  */
 public class ProviderClient {
 
     private static final int MAX_RESPONSE_TOKENS = 16_000;
+    private static final int MAX_TRUNCATION_CONTINUATIONS = 3;
 
     private final ProviderConfig config;
     private final ObjectMapper mapper;
@@ -177,7 +179,22 @@ public class ProviderClient {
 
             ensureSuccessfulResponse(response, body);
 
-            String modelText = extractModelContent(body, jobConfig.allowNonStandardResponses());
+            ModelContent modelContent = extractModelContent(
+                    body,
+                    jobConfig.allowNonStandardResponses(),
+                    jobConfig.autoContinueTruncatedOutput());
+            String modelText = modelContent.text();
+            if (modelContent.truncated()) {
+                modelText = continueTruncatedModelOutput(
+                        task,
+                        jobConfig,
+                        pauseController,
+                        requestTimeout,
+                        adjustedPrompt.systemPrompt(),
+                        adjustedPrompt.userPrompt(),
+                        modelText,
+                        log);
+            }
             debugLog(log, jobConfig.debugMode(), "Model message.content text (batch=" + task.index() + ")", modelText);
             Map<String, JsonNode> entries = parseValidateWithRepair(
                     task,
@@ -307,10 +324,69 @@ public class ProviderClient {
                 "HTTP repair response after POST_RESPONSE hook (batch=" + task.index() + ")", body);
         ensureSuccessfulResponse(response, body);
 
-        String repairedText = extractModelContent(body, true);
+        String repairedText = extractModelContent(body, true, true).text();
         debugLog(log, jobConfig.debugMode(),
                 "Repaired model message.content text (batch=" + task.index() + ")", repairedText);
         return repairedText;
+    }
+
+    private String continueTruncatedModelOutput(
+            BatchTask task,
+            JobConfig jobConfig,
+            PauseController pauseController,
+            Duration requestTimeout,
+            String originalSystemPrompt,
+            String originalUserPrompt,
+            String partialText,
+            Consumer<String> log
+    ) throws ProviderException, InterruptedException, ScriptHookException {
+        // Ask for append-only suffixes; json_object response_format can block valid partial suffixes.
+        StringBuilder combined = new StringBuilder(partialText == null ? "" : partialText);
+        for (int round = 1; round <= MAX_TRUNCATION_CONTINUATIONS; round++) {
+            pauseController.awaitIfPaused();
+            if (pauseController.isStopRequested()) {
+                throw new RetryableProviderException("job is stopping");
+            }
+            quotaLimiter.acquire(config.name(), pauseController, log);
+            if (log != null) {
+                log.accept("[" + config.name() + "] model output truncated, requesting continuation"
+                        + " (batch=" + task.index() + ", round=" + round + ")");
+            }
+
+            HttpResponse<String> response = sendRequestWithFormatFallback(
+                    buildContinuationSystemPrompt(),
+                    buildContinuationUserPrompt(task, originalSystemPrompt, originalUserPrompt, combined.toString()),
+                    task.words().size(),
+                    requestTimeout,
+                    jobConfig,
+                    pauseController,
+                    log,
+                    jobConfig.debugMode(),
+                    task.index(),
+                    false);
+
+            int status = response.statusCode();
+            String body = response.body() == null ? "" : response.body();
+            debugLog(log, jobConfig.debugMode(),
+                    "HTTP continuation response raw (status=" + status + ", batch=" + task.index()
+                            + ", round=" + round + ")", body);
+            body = hookExecutor.applyPostResponseHook(
+                    jobConfig,
+                    config,
+                    task.index(),
+                    status,
+                    body,
+                    log);
+            ensureSuccessfulResponse(response, body);
+
+            ModelContent continuation = extractModelContent(body, true, true);
+            combined.append(continuation.text());
+            if (!continuation.truncated()) {
+                return combined.toString();
+            }
+        }
+        throw new RetryableProviderException("model output remained truncated after "
+                + MAX_TRUNCATION_CONTINUATIONS + " continuation requests");
     }
 
     private HttpResponse<String> sendRequestWithFormatFallback(
@@ -324,9 +400,36 @@ public class ProviderClient {
             boolean debugMode,
             int batchIndex
     ) throws RetryableProviderException {
+        return sendRequestWithFormatFallback(
+                systemPrompt,
+                userPrompt,
+                wordCount,
+                requestTimeout,
+                jobConfig,
+                pauseController,
+                log,
+                debugMode,
+                batchIndex,
+                true);
+    }
+
+    private HttpResponse<String> sendRequestWithFormatFallback(
+            String systemPrompt,
+            String userPrompt,
+            int wordCount,
+            Duration requestTimeout,
+            JobConfig jobConfig,
+            PauseController pauseController,
+            Consumer<String> log,
+            boolean debugMode,
+            int batchIndex,
+            boolean allowResponseFormat
+    ) throws RetryableProviderException {
         List<RequestBodyOptions> attempts = new ArrayList<>();
-        attempts.add(new RequestBodyOptions(true, true));
-        attempts.add(new RequestBodyOptions(true, false));
+        if (allowResponseFormat) {
+            attempts.add(new RequestBodyOptions(true, true));
+            attempts.add(new RequestBodyOptions(true, false));
+        }
         attempts.add(new RequestBodyOptions(false, true));
         attempts.add(new RequestBodyOptions(false, false));
 
@@ -498,6 +601,35 @@ public class ProviderClient {
                 + "Target explanation language: " + targetLanguage + ".";
     }
 
+    private String buildContinuationSystemPrompt() {
+        return "You continue a truncated JSON response. "
+                + "Return only the missing suffix that should be appended to the previous output. "
+                + "Do not repeat prior content. Do not use markdown, code fences, comments, or explanations.";
+    }
+
+    private String buildContinuationUserPrompt(
+            BatchTask task,
+            String originalSystemPrompt,
+            String originalUserPrompt,
+            String partialText
+    ) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("The previous response was cut off because it reached the token limit.\n");
+        sb.append("Continue the same JSON output from the next character only.\n");
+        sb.append("Input words JSON: ").append(toJsonString(task.words())).append("\n");
+        sb.append("Original system prompt as JSON string:\n")
+                .append(toJsonString(compactForPrompt(originalSystemPrompt, 4000)))
+                .append("\n");
+        sb.append("Original user prompt as JSON string:\n")
+                .append(toJsonString(compactForPrompt(originalUserPrompt, 6000)))
+                .append("\n");
+        sb.append("Already received output as JSON string:\n")
+                .append(toJsonString(compactForPrompt(partialText, 12000)))
+                .append("\n");
+        sb.append("Return only the remaining suffix.");
+        return sb.toString();
+    }
+
     private String buildRepairUserPrompt(
             JobConfig jobConfig,
             BatchTask task,
@@ -570,14 +702,18 @@ public class ProviderClient {
         }
     }
 
-    private String extractModelContent(String responseBody, boolean allowNonStandardResponses) throws RetryableProviderException {
+    private ModelContent extractModelContent(
+            String responseBody,
+            boolean allowNonStandardResponses,
+            boolean allowTruncated
+    ) throws RetryableProviderException {
         JsonNode root = parseResponseRoot(responseBody, allowNonStandardResponses);
         JsonNode choices = root.path("choices");
         if (!choices.isArray() || choices.isEmpty()) {
             if (allowNonStandardResponses) {
                 String directContent = extractDirectModelContent(root);
                 if (directContent != null && !directContent.isBlank()) {
-                    return directContent;
+                    return new ModelContent(directContent, false);
                 }
             }
             throw new RetryableProviderException("response missing choices");
@@ -585,22 +721,23 @@ public class ProviderClient {
 
         JsonNode firstChoice = choices.get(0);
         String finishReason = firstChoice.path("finish_reason").asText("");
-        if ("length".equalsIgnoreCase(finishReason)) {
-            throw new RetryableProviderException("model output was truncated (finish_reason=length)");
-        }
+        boolean truncated = "length".equalsIgnoreCase(finishReason);
 
         JsonNode content = firstChoice.path("message").path("content");
+        String contentText = null;
         if (content.isTextual()) {
-            return content.asText();
+            contentText = content.asText();
+        } else if (allowNonStandardResponses) {
+            // Some compatible providers use content arrays instead of a plain string.
+            contentText = extractTextFromContentNode(content);
         }
-        if (allowNonStandardResponses) {
-            String contentText = extractTextFromContentNode(content);
-            if (contentText != null && !contentText.isBlank()) {
-                return contentText;
+        if (contentText != null && !contentText.isBlank()) {
+            if (truncated && !allowTruncated) {
+                throw new RetryableProviderException("model output was truncated (finish_reason=length)");
             }
+            return new ModelContent(contentText, truncated);
         }
 
-            // 一些模型会返回 content 数组，如 [{"type":"text","text":"..."}]
         throw new RetryableProviderException("response missing message.content text");
     }
 
@@ -1262,6 +1399,9 @@ public class ProviderClient {
         } catch (Exception ignored) {
             return "";
         }
+    }
+
+    private record ModelContent(String text, boolean truncated) {
     }
 
     private record RequestBodyOptions(boolean useResponseFormat, boolean includeMaxTokens) {

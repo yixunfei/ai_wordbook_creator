@@ -36,6 +36,8 @@ public class UiSettings {
     public boolean resumeFromCheckpoint = true;
     public boolean clearCheckpointOnSuccess = true;
     public boolean allowNonStandardResponses = true;
+    /** Default off because continuation can repeat suffixes on weaker providers. */
+    public boolean autoContinueTruncatedOutput = false;
 
     public boolean useSystemPromptOverride = false;
     public String systemPromptTemplate = "";

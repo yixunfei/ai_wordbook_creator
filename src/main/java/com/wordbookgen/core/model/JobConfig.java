@@ -35,6 +35,7 @@ public final class JobConfig {
     private final boolean resumeFromCheckpoint;
     private final boolean clearCheckpointOnSuccess;
     private final boolean allowNonStandardResponses;
+    private final boolean autoContinueTruncatedOutput;
 
     /**
      * 高级设置：系统提示词覆盖。
@@ -69,6 +70,7 @@ public final class JobConfig {
         this.resumeFromCheckpoint = builder.resumeFromCheckpoint;
         this.clearCheckpointOnSuccess = builder.clearCheckpointOnSuccess;
         this.allowNonStandardResponses = builder.allowNonStandardResponses;
+        this.autoContinueTruncatedOutput = builder.autoContinueTruncatedOutput;
         this.useSystemPromptOverride = builder.useSystemPromptOverride;
         this.systemPromptTemplate = builder.systemPromptTemplate;
         this.preRequestHook = builder.preRequestHook;
@@ -149,6 +151,10 @@ public final class JobConfig {
         return allowNonStandardResponses;
     }
 
+    public boolean autoContinueTruncatedOutput() {
+        return autoContinueTruncatedOutput;
+    }
+
     public boolean useSystemPromptOverride() {
         return useSystemPromptOverride;
     }
@@ -186,6 +192,7 @@ public final class JobConfig {
                 String.valueOf(batchSize),
                 String.valueOf(parallelism),
                 String.valueOf(allowNonStandardResponses),
+                String.valueOf(autoContinueTruncatedOutput),
                 String.valueOf(useSystemPromptOverride),
                 safe(systemPromptTemplate),
                 hookFingerprint(preRequestHook),
@@ -234,6 +241,7 @@ public final class JobConfig {
         private boolean resumeFromCheckpoint = true;
         private boolean clearCheckpointOnSuccess = true;
         private boolean allowNonStandardResponses = true;
+        private boolean autoContinueTruncatedOutput = false;
 
         private boolean useSystemPromptOverride = false;
         private String systemPromptTemplate = "";
@@ -329,6 +337,11 @@ public final class JobConfig {
 
         public Builder allowNonStandardResponses(boolean allowNonStandardResponses) {
             this.allowNonStandardResponses = allowNonStandardResponses;
+            return this;
+        }
+
+        public Builder autoContinueTruncatedOutput(boolean autoContinueTruncatedOutput) {
+            this.autoContinueTruncatedOutput = autoContinueTruncatedOutput;
             return this;
         }
 
