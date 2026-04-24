@@ -1,0 +1,50 @@
+# Build outputs
+/target/
+/out/
+/build/
+*.class
+*.jar
+*.war
+*.ear
+
+# IDE and editor metadata
+/.idea/
+*.iml
+/.vscode/
+/.settings/
+/.classpath
+/.project
+
+# Local runtime config and secrets
+.env
+.env.*
+!.env.example
+*.apikey
+secrets.*
+*.secret
+*.local
+*.local.*
+ui-settings.json
+.wordbookgen/
+local-config/
+private-config/
+
+# Generated job state and outputs
+*.checkpoint.json
+wordbook.json
+wordbook.csv
+output.json
+output.csv
+
+# Logs and temp files
+*.log
+logs/
+*.tmp
+*.bak
+*.swp
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
