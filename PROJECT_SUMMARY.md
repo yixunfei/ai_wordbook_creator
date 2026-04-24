@@ -45,5 +45,5 @@ target/wordbook-gen-1.0.0-shaded.jar
 - `.gitignore` 已排除密钥、本地配置、断点、输出文件、IDE 元数据和构建产物。
 - `ui-settings.json` can contain API keys and must not be committed.
 - `ui-settings.json` 可能包含 API Key，不能提交。
-- Add a license before public release.
-- 公开发布前请添加许可证。
+- The project includes an MIT License.
+- 项目已包含 MIT License。

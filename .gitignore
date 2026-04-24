@@ -5,7 +5,15 @@
 *.class
 *.jar
 *.war
+*.nar
 *.ear
+*.zip
+*.tar.gz
+*.rar
+
+# JVM crash logs
+hs_err_pid*
+replay_pid*
 
 # IDE and editor metadata
 /.idea/
@@ -14,6 +22,8 @@
 /.settings/
 /.classpath
 /.project
+*.ctxt
+.mtj.tmp/
 
 # Local runtime config and secrets
 .env

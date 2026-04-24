@@ -242,9 +242,9 @@ Recommended release artifact / 推荐发布产物：
 target/wordbook-gen-1.0.0-shaded.jar
 ```
 
-Before a public release, choose and add a license such as MIT or Apache-2.0.
+This project is released under the MIT License. See `LICENSE`.
 
-公开发布前，请选择并添加许可证，例如 MIT 或 Apache-2.0。
+本项目使用 MIT License 发布，详见 `LICENSE`。
 
 ## Known Risks and Limitations / 潜在问题与限制
 
