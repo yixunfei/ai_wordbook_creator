@@ -17,12 +17,11 @@ import javax.swing.BoxLayout;
 import javax.swing.JButton;
 import javax.swing.JCheckBox;
 import javax.swing.JComboBox;
-import javax.swing.JDialog;
+import javax.swing.JComponent;
 import javax.swing.JFileChooser;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
 import javax.swing.JOptionPane;
-import javax.swing.JPasswordField;
 import javax.swing.JPanel;
 import javax.swing.JProgressBar;
 import javax.swing.JScrollPane;
@@ -31,13 +30,11 @@ import javax.swing.JSplitPane;
 import javax.swing.JTextArea;
 import javax.swing.JTextField;
 import javax.swing.SpinnerNumberModel;
+import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
-import javax.swing.event.DocumentEvent;
-import javax.swing.event.DocumentListener;
 import javax.swing.filechooser.FileNameExtensionFilter;
 import java.awt.BorderLayout;
 import java.awt.Color;
-import java.awt.Cursor;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.GridBagConstraints;
@@ -50,12 +47,10 @@ import java.awt.event.MouseEvent;
 import java.io.File;
 import java.io.PrintWriter;
 import java.io.StringWriter;
-import java.net.URI;
 import java.nio.charset.Charset;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
@@ -68,32 +63,21 @@ public class WordbookGenFrame extends JFrame {
 
     private static final int DEFAULT_BATCH_SIZE = 12;
     private static final int DEFAULT_TIMEOUT_SEC = 180;
-    private static final int LOG_PANEL_EXPANDED_HEIGHT = 220;
-    private static final int LOG_PANEL_COLLAPSED_HEIGHT = 54;
+    private static final int LOG_PANEL_EXPANDED_HEIGHT = 180;
+    private static final int LOG_PANEL_COLLAPSED_HEIGHT = 48;
+    private static final int MAIN_LABEL_WIDTH = 118;
+    private static final int PATH_FIELD_WIDTH = 560;
+    private static final int OPTION_FIELD_WIDTH = 144;
     private static final Color APP_BACKGROUND = new Color(244, 247, 251);
     private static final Color CARD_BACKGROUND = Color.WHITE;
     private static final Color SOFT_BORDER = new Color(218, 226, 236);
-
-    /**
-     * 内置脚本根目录。
-     */
-    private static final Path BUILTIN_SCRIPTS_DIR = Path.of("examples", "hooks", "builtin")
-            .toAbsolutePath()
-            .normalize();
-
-    /**
-     * 示例脚本根目录（当内置目录不存在时回退）。
-     */
-    private static final Path EXAMPLE_SCRIPTS_DIR = Path.of("examples", "hooks")
-            .toAbsolutePath()
-            .normalize();
 
     private final WordbookJobEngine engine = new WordbookJobEngine();
     private final UiConfigStore configStore = new UiConfigStore();
     private final ProviderConnectivityTester connectivityTester = new ProviderConnectivityTester();
     private final ModelDiscoveryClient modelDiscoveryClient = new ModelDiscoveryClient();
 
-    private final JTextArea promptArea = new JTextArea(4, 80);
+    private final JTextArea promptArea = new JTextArea(3, 60);
     private final JTextField inputPathField = new JTextField();
     private final JTextField outputPathField = new JTextField();
     private final JTextField configDirectoryField = new JTextField();
@@ -143,7 +127,7 @@ public class WordbookGenFrame extends JFrame {
     public WordbookGenFrame() {
         super("WordbookGen - AI 单词本生成器");
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-        setMinimumSize(new Dimension(960, 680));
+        setMinimumSize(new Dimension(900, 600));
         adaptWindowSizeToScreen();
         setLocationRelativeTo(null);
 
@@ -207,8 +191,8 @@ public class WordbookGenFrame extends JFrame {
 
     private void adaptWindowSizeToScreen() {
         Dimension screen = Toolkit.getDefaultToolkit().getScreenSize();
-        int width = Math.max(960, Math.min((int) (screen.width * 0.92), 1500));
-        int height = Math.max(680, Math.min((int) (screen.height * 0.9), 980));
+        int width = Math.max(920, Math.min((int) (screen.width * 0.86), 1280));
+        int height = Math.max(620, Math.min((int) (screen.height * 0.78), 820));
         setSize(new Dimension(width, height));
     }
 
@@ -231,7 +215,7 @@ public class WordbookGenFrame extends JFrame {
         JPanel right = new JPanel(new FlowLayout(FlowLayout.RIGHT));
         right.setOpaque(false);
         progressBar.setStringPainted(true);
-        progressBar.setPreferredSize(new Dimension(380, 26));
+        progressBar.setPreferredSize(new Dimension(240, 24));
         right.add(progressBar);
         right.add(Box.createHorizontalStrut(8));
         right.add(statusLabel);
@@ -266,7 +250,9 @@ public class WordbookGenFrame extends JFrame {
         c.gridy = 3;
         c.weighty = 1;
         c.fill = GridBagConstraints.BOTH;
-        container.add(new JPanel(), c);
+        JPanel filler = new JPanel();
+        filler.setBackground(APP_BACKGROUND);
+        container.add(filler, c);
         return container;
     }
 
@@ -275,25 +261,31 @@ public class WordbookGenFrame extends JFrame {
         applySectionStyle(panel, "\u8f93\u5165\u8f93\u51fa\u4e0e\u8fd0\u884c\u9009\u9879");
 
         GridBagConstraints c = new GridBagConstraints();
-        c.insets = new Insets(6, 8, 6, 8);
+        c.gridx = 0;
+        c.weightx = 1;
+        c.insets = new Insets(5, 8, 5, 8);
         c.fill = GridBagConstraints.HORIZONTAL;
         int row = 0;
 
-        addPathRow(panel, c, row++, "\u8f93\u5165\u5355\u8bcd\u6587\u4ef6", inputPathField,
-                "\u9009\u62e9", this::chooseInputFile);
-        addPathRow(panel, c, row++, "\u8f93\u51fa\u6587\u4ef6", outputPathField,
-                "\u9009\u62e9", this::chooseOutputFile);
-        addPathRow(panel, c, row++, "\u914d\u7f6e\u6587\u4ef6\u5939", configDirectoryField,
-                browseConfigDirectoryButton, this::chooseConfigDirectory);
+        addFullWidthRow(panel, c, row++, createPathRow("\u8f93\u5165\u5355\u8bcd\u6587\u4ef6", inputPathField,
+                new JButton("\u9009\u62e9"), this::chooseInputFile));
+        addFullWidthRow(panel, c, row++, createPathRow("\u8f93\u51fa\u6587\u4ef6", outputPathField,
+                new JButton("\u9009\u62e9"), this::chooseOutputFile));
+        addFullWidthRow(panel, c, row++, createPathRow("\u914d\u7f6e\u6587\u4ef6\u5939", configDirectoryField,
+                browseConfigDirectoryButton, this::chooseConfigDirectory));
 
-        addLabeledComponent(panel, c, row, 0, "\u8f93\u51fa\u683c\u5f0f", outputFormatCombo, 1);
-        addLabeledComponent(panel, c, row++, 2, "\u6587\u4ef6\u7f16\u7801", encodingCombo, 1);
-        addLabeledComponent(panel, c, row, 0, "\u6e90\u8bed\u8a00", sourceLangField, 1);
-        addLabeledComponent(panel, c, row++, 2, "\u91ca\u4e49\u8bed\u8a00", targetLangField, 1);
-        addLabeledComponent(panel, c, row, 0, "\u6279\u5927\u5c0f", batchSizeSpinner, 1);
-        addLabeledComponent(panel, c, row++, 2, "\u5e76\u53d1\u6570", parallelismSpinner, 1);
-        addLabeledComponent(panel, c, row, 0, "\u91cd\u8bd5\u6b21\u6570", retriesSpinner, 1);
-        addLabeledComponent(panel, c, row++, 2, "\u8bf7\u6c42\u8d85\u65f6(\u79d2)", timeoutSpinner, 1);
+        addFullWidthRow(panel, c, row++, createOptionRow(
+                "\u8f93\u51fa\u683c\u5f0f", outputFormatCombo,
+                "\u6587\u4ef6\u7f16\u7801", encodingCombo));
+        addFullWidthRow(panel, c, row++, createOptionRow(
+                "\u6e90\u8bed\u8a00", sourceLangField,
+                "\u91ca\u4e49\u8bed\u8a00", targetLangField));
+        addFullWidthRow(panel, c, row++, createOptionRow(
+                "\u6279\u5927\u5c0f", batchSizeSpinner,
+                "\u5e76\u53d1\u6570", parallelismSpinner));
+        addFullWidthRow(panel, c, row++, createOptionRow(
+                "\u91cd\u8bd5\u6b21\u6570", retriesSpinner,
+                "\u8bf7\u6c42\u8d85\u65f6(\u79d2)", timeoutSpinner));
 
         JPanel switches = new JPanel(new FlowLayout(FlowLayout.LEFT, 12, 0));
         switches.setOpaque(false);
@@ -301,70 +293,79 @@ public class WordbookGenFrame extends JFrame {
         switches.add(clearCheckpointCheck);
         switches.add(allowNonStandardResponsesCheck);
         switches.add(autoContinueTruncatedCheck);
-        c.gridx = 0;
-        c.gridy = row;
-        c.gridwidth = 4;
-        c.weightx = 1;
-        panel.add(switches, c);
-        c.gridwidth = 1;
+        addFullWidthRow(panel, c, row, switches);
         return panel;
     }
 
-    private void addPathRow(
-            JPanel panel,
-            GridBagConstraints c,
-            int row,
-            String label,
-            JTextField field,
-            String buttonText,
-            Runnable action
-    ) {
-        addPathRow(panel, c, row, label, field, new JButton(buttonText), action);
+    private void addFullWidthRow(JPanel panel, GridBagConstraints c, int row, JPanel rowPanel) {
+        c.gridy = row;
+        c.weightx = 1;
+        panel.add(rowPanel, c);
     }
 
-    private void addPathRow(
-            JPanel panel,
-            GridBagConstraints c,
-            int row,
-            String label,
-            JTextField field,
-            JButton button,
-            Runnable action
-    ) {
-        c.gridy = row;
+    private JPanel createPathRow(String label, JTextField field, JButton button, Runnable action) {
+        JPanel row = new JPanel(new GridBagLayout());
+        row.setOpaque(false);
+        setPreferredWidth(field, PATH_FIELD_WIDTH);
+
+        GridBagConstraints c = new GridBagConstraints();
+        c.gridy = 0;
+        c.insets = new Insets(0, 0, 0, 8);
+        c.fill = GridBagConstraints.HORIZONTAL;
+
         c.gridx = 0;
         c.weightx = 0;
-        panel.add(new JLabel(label), c);
+        row.add(fixedLabel(label), c);
         c.gridx = 1;
-        c.gridwidth = 2;
-        c.weightx = 1;
-        panel.add(field, c);
-        c.gridx = 3;
-        c.gridwidth = 1;
-        c.weightx = 0;
+        row.add(field, c);
+        c.gridx = 2;
         button.addActionListener(e -> action.run());
-        panel.add(button, c);
+        row.add(button, c);
+        c.gridx = 3;
+        c.weightx = 1;
+        c.insets = new Insets(0, 0, 0, 0);
+        row.add(createTransparentFiller(), c);
+        return row;
     }
 
-    private void addLabeledComponent(
-            JPanel panel,
-            GridBagConstraints c,
-            int row,
-            int column,
-            String label,
-            java.awt.Component component,
-            int componentWidth
+    private JPanel createOptionRow(
+            String leftLabel,
+            JComponent leftComponent,
+            String rightLabel,
+            JComponent rightComponent
     ) {
-        c.gridy = row;
-        c.gridx = column;
-        c.gridwidth = 1;
-        c.weightx = 0;
-        panel.add(new JLabel(label), c);
-        c.gridx = column + 1;
-        c.gridwidth = componentWidth;
-        c.weightx = 1;
-        panel.add(component, c);
-        c.gridwidth = 1;
+        JPanel row = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
+        row.setOpaque(false);
+        addOption(row, leftLabel, leftComponent);
+        row.add(Box.createHorizontalStrut(12));
+        addOption(row, rightLabel, rightComponent);
+        return row;
+    }
+
+    private void addOption(JPanel row, String label, JComponent component) {
+        setPreferredWidth(component, OPTION_FIELD_WIDTH);
+        row.add(fixedLabel(label));
+        row.add(component);
+    }
+
+    private JLabel fixedLabel(String text) {
+        JLabel label = new JLabel(text);
+        Dimension size = new Dimension(MAIN_LABEL_WIDTH, label.getPreferredSize().height);
+        label.setPreferredSize(size);
+        label.setMinimumSize(size);
+        label.setHorizontalAlignment(SwingConstants.RIGHT);
+        return label;
+    }
+
+    private void setPreferredWidth(JComponent component, int width) {
+        Dimension preferred = component.getPreferredSize();
+        component.setPreferredSize(new Dimension(width, preferred.height));
+    }
+
+    private JPanel createTransparentFiller() {
+        JPanel filler = new JPanel();
+        filler.setOpaque(false);
+        return filler;
     }
 
     private JPanel createNaturalProviderPanel() {
@@ -385,7 +386,7 @@ public class WordbookGenFrame extends JFrame {
         providersListPanel.setLayout(new BoxLayout(providersListPanel, BoxLayout.Y_AXIS));
         providersListPanel.setBackground(CARD_BACKGROUND);
         JScrollPane scrollPane = new JScrollPane(providersListPanel);
-        scrollPane.setPreferredSize(new Dimension(10, 280));
+        scrollPane.setPreferredSize(new Dimension(10, 240));
         panel.add(scrollPane, BorderLayout.CENTER);
         return panel;
     }
@@ -472,153 +473,6 @@ public class WordbookGenFrame extends JFrame {
                     mainSplitPane.getHeight() - LOG_PANEL_EXPANDED_HEIGHT - mainSplitPane.getDividerSize());
             mainSplitPane.setDividerLocation(target);
         });
-    }
-
-    private JPanel createPathAndOptionsPanel() {
-        JPanel panel = new JPanel(new GridBagLayout());
-        panel.setBorder(BorderFactory.createTitledBorder("基础配置"));
-
-        GridBagConstraints c = new GridBagConstraints();
-        c.insets = new Insets(6, 6, 6, 6);
-        c.fill = GridBagConstraints.HORIZONTAL;
-        c.weightx = 0;
-        int row = 0;
-
-        c.gridx = 0;
-        c.gridy = row;
-        panel.add(new JLabel("输入文件路径"), c);
-        c.gridx = 1;
-        c.weightx = 1;
-        panel.add(inputPathField, c);
-        c.gridx = 2;
-        c.weightx = 0;
-        JButton browseInput = new JButton("浏览");
-        browseInput.addActionListener(e -> chooseInputFile());
-        panel.add(browseInput, c);
-
-        row++;
-        c.gridx = 0;
-        c.gridy = row;
-        panel.add(new JLabel("输出文件路径"), c);
-        c.gridx = 1;
-        c.weightx = 1;
-        panel.add(outputPathField, c);
-        c.gridx = 2;
-        c.weightx = 0;
-        JButton browseOutput = new JButton("浏览");
-        browseOutput.addActionListener(e -> chooseOutputFile());
-        panel.add(browseOutput, c);
-
-        row++;
-        c.gridx = 0;
-        c.gridy = row;
-        panel.add(new JLabel("\u914d\u7f6e\u6587\u4ef6\u5939"), c);
-        c.gridx = 1;
-        c.weightx = 1;
-        panel.add(configDirectoryField, c);
-        c.gridx = 2;
-        c.weightx = 0;
-        browseConfigDirectoryButton.addActionListener(e -> chooseConfigDirectory());
-        panel.add(browseConfigDirectoryButton, c);
-
-        row++;
-        c.gridy = row;
-        c.gridx = 0;
-        panel.add(new JLabel("输出格式"), c);
-        c.gridx = 1;
-        panel.add(outputFormatCombo, c);
-        c.gridx = 2;
-        panel.add(new JLabel("编码"), c);
-        c.gridx = 3;
-        panel.add(encodingCombo, c);
-
-        row++;
-        c.gridy = row;
-        c.gridx = 0;
-        panel.add(new JLabel("源语言"), c);
-        c.gridx = 1;
-        panel.add(sourceLangField, c);
-        c.gridx = 2;
-        panel.add(new JLabel("目标解释语言"), c);
-        c.gridx = 3;
-        panel.add(targetLangField, c);
-
-        row++;
-        c.gridy = row;
-        c.gridx = 0;
-        panel.add(new JLabel("批大小"), c);
-        c.gridx = 1;
-        panel.add(batchSizeSpinner, c);
-        c.gridx = 2;
-        panel.add(new JLabel("并发度(<=8)"), c);
-        c.gridx = 3;
-        panel.add(parallelismSpinner, c);
-
-        row++;
-        c.gridy = row;
-        c.gridx = 0;
-        panel.add(new JLabel("最大重试"), c);
-        c.gridx = 1;
-        panel.add(retriesSpinner, c);
-        c.gridx = 2;
-        panel.add(new JLabel("请求超时(秒)"), c);
-        c.gridx = 3;
-        panel.add(timeoutSpinner, c);
-
-        row++;
-        c.gridy = row;
-        c.gridx = 0;
-        c.gridwidth = 2;
-        panel.add(resumeCheck, c);
-        c.gridx = 2;
-        c.gridwidth = 2;
-        panel.add(clearCheckpointCheck, c);
-        row++;
-        c.gridy = row;
-        c.gridx = 0;
-        c.gridwidth = 4;
-        panel.add(allowNonStandardResponsesCheck, c);
-        c.gridwidth = 1;
-        return panel;
-    }
-
-    private JPanel createProviderPanel() {
-        JPanel panel = new JPanel(new BorderLayout());
-        panel.setBorder(BorderFactory.createTitledBorder("Provider 配置（可折叠卡片 / 拖拽排序 / 复制）"));
-
-        JPanel topBar = new JPanel(new BorderLayout());
-        topBar.add(new JLabel("每个 Provider 独立配置，支持连接测试与自动发现模型列表"), BorderLayout.WEST);
-        JPanel rightActions = new JPanel(new FlowLayout(FlowLayout.RIGHT, 6, 0));
-        rightActions.add(autoFetchModelsAfterTestCheck);
-        rightActions.add(addProviderButton);
-        topBar.add(rightActions, BorderLayout.EAST);
-        panel.add(topBar, BorderLayout.NORTH);
-
-        providersListPanel.setLayout(new BoxLayout(providersListPanel, BoxLayout.Y_AXIS));
-        JScrollPane scrollPane = new JScrollPane(providersListPanel);
-        scrollPane.setPreferredSize(new Dimension(10, 280));
-        panel.add(scrollPane, BorderLayout.CENTER);
-        return panel;
-    }
-
-    private JPanel createPromptPanel() {
-        JPanel panel = new JPanel(new BorderLayout());
-        panel.setBorder(BorderFactory.createTitledBorder("用户提示词补充"));
-        promptArea.setLineWrap(true);
-        promptArea.setWrapStyleWord(true);
-        panel.add(new JScrollPane(promptArea), BorderLayout.CENTER);
-        return panel;
-    }
-
-    private JPanel createLogPanel() {
-        JPanel panel = new JPanel(new BorderLayout());
-        panel.setBorder(BorderFactory.createTitledBorder("控制台日志"));
-        logArea.setEditable(false);
-        logArea.setLineWrap(true);
-        logArea.setWrapStyleWord(true);
-        panel.add(new JScrollPane(logArea), BorderLayout.CENTER);
-        panel.setPreferredSize(new Dimension(10, 220));
-        return panel;
     }
 
     private void bindActions() {
@@ -1250,594 +1104,4 @@ public class WordbookGenFrame extends JFrame {
         JOptionPane.showMessageDialog(this, scrollPane, title, messageType);
     }
 
-    /**
-     * 高级设置状态。
-     */
-    private static class AdvancedSettingsState {
-        boolean useSystemPromptOverride;
-        String systemPromptTemplate;
-        boolean debugMode;
-        UiScriptHookItem preRequestHook;
-        UiScriptHookItem postResponseHook;
-        UiScriptHookItem postParsedHook;
-
-        static AdvancedSettingsState defaultState() {
-            AdvancedSettingsState state = new AdvancedSettingsState();
-            state.useSystemPromptOverride = false;
-            state.systemPromptTemplate = "";
-            state.debugMode = false;
-            state.preRequestHook = new UiScriptHookItem();
-            state.postResponseHook = new UiScriptHookItem();
-            state.postParsedHook = new UiScriptHookItem();
-            return state;
-        }
-
-        AdvancedSettingsState copy() {
-            AdvancedSettingsState ret = new AdvancedSettingsState();
-            ret.useSystemPromptOverride = this.useSystemPromptOverride;
-            ret.systemPromptTemplate = this.systemPromptTemplate == null ? "" : this.systemPromptTemplate;
-            ret.debugMode = this.debugMode;
-            ret.preRequestHook = copyHook(this.preRequestHook);
-            ret.postResponseHook = copyHook(this.postResponseHook);
-            ret.postParsedHook = copyHook(this.postParsedHook);
-            return ret;
-        }
-
-        private UiScriptHookItem copyHook(UiScriptHookItem item) {
-            UiScriptHookItem ret = new UiScriptHookItem();
-            if (item == null) {
-                return ret;
-            }
-            ret.enabled = item.enabled;
-            ret.language = item.language;
-            ret.scriptPath = item.scriptPath;
-            ret.timeoutSec = item.timeoutSec;
-            return ret;
-        }
-    }
-
-    /**
-     * 高级设置弹窗。
-     */
-    private static class AdvancedSettingsDialog extends JDialog {
-
-        private final JCheckBox overrideCheck = new JCheckBox("启用系统提示词覆盖");
-        private final JCheckBox debugCheck = new JCheckBox("调试模式：输出完整模型返回（日志会明显变长）");
-        private final JTextArea systemPromptArea = new JTextArea(8, 80);
-
-        private final HookPanel preRequestPanel = new HookPanel("请求前 Hook（PRE_REQUEST）");
-        private final HookPanel postResponsePanel = new HookPanel("响应返回 Hook（POST_RESPONSE）");
-        private final HookPanel postParsedPanel = new HookPanel("结果解析后 Hook（POST_PARSED）");
-
-        private final AdvancedSettingsState result;
-        private boolean confirmed = false;
-
-        AdvancedSettingsDialog(JFrame owner, AdvancedSettingsState current) {
-            super(owner, "高级设置", true);
-            this.result = current.copy();
-            setSize(980, 760);
-            setLocationRelativeTo(owner);
-            setLayout(new BorderLayout(8, 8));
-
-            JPanel root = new JPanel();
-            root.setLayout(new BoxLayout(root, BoxLayout.Y_AXIS));
-
-            JPanel systemPromptPanel = new JPanel(new BorderLayout());
-            systemPromptPanel.setBorder(BorderFactory.createTitledBorder("系统提示词覆盖"));
-            overrideCheck.setSelected(current.useSystemPromptOverride);
-            debugCheck.setSelected(current.debugMode);
-            systemPromptArea.setText(current.systemPromptTemplate == null ? "" : current.systemPromptTemplate);
-            systemPromptArea.setLineWrap(true);
-            systemPromptArea.setWrapStyleWord(true);
-            String help = "可用占位符：{{sourceLanguage}} {{targetLanguage}} {{requiredFields}}";
-            JPanel systemTop = new JPanel();
-            systemTop.setLayout(new BoxLayout(systemTop, BoxLayout.Y_AXIS));
-            systemTop.add(overrideCheck);
-            systemTop.add(debugCheck);
-            systemPromptPanel.add(systemTop, BorderLayout.NORTH);
-            systemPromptPanel.add(new JScrollPane(systemPromptArea), BorderLayout.CENTER);
-            systemPromptPanel.add(new JLabel(help), BorderLayout.SOUTH);
-            root.add(systemPromptPanel);
-            root.add(Box.createVerticalStrut(8));
-
-            preRequestPanel.fill(current.preRequestHook);
-            postResponsePanel.fill(current.postResponseHook);
-            postParsedPanel.fill(current.postParsedHook);
-
-            root.add(preRequestPanel);
-            root.add(Box.createVerticalStrut(6));
-            root.add(postResponsePanel);
-            root.add(Box.createVerticalStrut(6));
-            root.add(postParsedPanel);
-
-            add(new JScrollPane(root), BorderLayout.CENTER);
-
-            JPanel footer = new JPanel(new FlowLayout(FlowLayout.RIGHT));
-            JButton okButton = new JButton("确定");
-            JButton cancelButton = new JButton("取消");
-            footer.add(okButton);
-            footer.add(cancelButton);
-            add(footer, BorderLayout.SOUTH);
-
-            okButton.addActionListener(e -> {
-                result.useSystemPromptOverride = overrideCheck.isSelected();
-                result.debugMode = debugCheck.isSelected();
-                result.systemPromptTemplate = systemPromptArea.getText();
-                result.preRequestHook = preRequestPanel.toItem();
-                result.postResponseHook = postResponsePanel.toItem();
-                result.postParsedHook = postParsedPanel.toItem();
-                confirmed = true;
-                dispose();
-            });
-            cancelButton.addActionListener(e -> dispose());
-        }
-
-        boolean isConfirmed() {
-            return confirmed;
-        }
-
-        AdvancedSettingsState result() {
-            return result;
-        }
-    }
-
-    /**
-     * 单个 Hook 的编辑区域。
-     */
-    private static class HookPanel extends JPanel {
-
-        private final JCheckBox enabledCheck = new JCheckBox("启用");
-        private final JComboBox<String> languageCombo = new JComboBox<>(new String[]{"PYTHON", "JAVASCRIPT", "LUA", "JAVA"});
-        private final JTextField pathField = new JTextField();
-        private final JSpinner timeoutSpinner = new JSpinner(new SpinnerNumberModel(30, 1, 600, 1));
-
-        HookPanel(String title) {
-            setLayout(new GridBagLayout());
-            setBorder(BorderFactory.createTitledBorder(title));
-
-            GridBagConstraints c = new GridBagConstraints();
-            c.insets = new Insets(4, 6, 4, 6);
-            c.fill = GridBagConstraints.HORIZONTAL;
-
-            c.gridx = 0;
-            c.gridy = 0;
-            add(enabledCheck, c);
-            c.gridx = 1;
-            add(new JLabel("语言"), c);
-            c.gridx = 2;
-            add(languageCombo, c);
-            c.gridx = 3;
-            add(new JLabel("超时(秒)"), c);
-            c.gridx = 4;
-            add(timeoutSpinner, c);
-
-            c.gridx = 0;
-            c.gridy = 1;
-            add(new JLabel("脚本路径"), c);
-            c.gridx = 1;
-            c.gridwidth = 3;
-            c.weightx = 1;
-            add(pathField, c);
-            c.gridx = 4;
-            c.gridwidth = 1;
-            c.weightx = 0;
-            JButton browseButton = new JButton("浏览");
-            browseButton.addActionListener(e -> {
-                JFileChooser chooser = new JFileChooser();
-                chooser.setFileSelectionMode(JFileChooser.FILES_ONLY);
-                File defaultDir = resolveScriptBrowseDirectory(pathField.getText());
-                if (defaultDir != null && defaultDir.exists()) {
-                    chooser.setCurrentDirectory(defaultDir);
-                }
-                if (chooser.showOpenDialog(this) == JFileChooser.APPROVE_OPTION) {
-                    pathField.setText(chooser.getSelectedFile().getAbsolutePath());
-                }
-            });
-            add(browseButton, c);
-        }
-
-        /**
-         * 脚本浏览的默认目录策略：
-         * 1. 优先使用当前输入路径（若存在）；
-         * 2. 否则使用内置脚本目录；
-         * 3. 再回退到示例脚本目录；
-         * 4. 最后回退到程序当前目录。
-         */
-        private File resolveScriptBrowseDirectory(String currentPath) {
-            if (currentPath != null && !currentPath.isBlank()) {
-                File current = new File(currentPath.trim());
-                if (current.exists()) {
-                    if (current.isDirectory()) {
-                        return current;
-                    }
-                    File parent = current.getParentFile();
-                    if (parent != null && parent.exists()) {
-                        return parent;
-                    }
-                }
-            }
-
-            File builtinDir = BUILTIN_SCRIPTS_DIR.toFile();
-            if (builtinDir.exists()) {
-                return builtinDir;
-            }
-
-            File exampleDir = EXAMPLE_SCRIPTS_DIR.toFile();
-            if (exampleDir.exists()) {
-                return exampleDir;
-            }
-
-            return new File(".").getAbsoluteFile();
-        }
-
-        void fill(UiScriptHookItem item) {
-            if (item == null) {
-                return;
-            }
-            enabledCheck.setSelected(item.enabled);
-            languageCombo.setSelectedItem(item.language == null ? "JAVASCRIPT" : item.language.toUpperCase(Locale.ROOT));
-            pathField.setText(item.scriptPath == null ? "" : item.scriptPath);
-            timeoutSpinner.setValue(item.timeoutSec <= 0 ? 30 : item.timeoutSec);
-        }
-
-        UiScriptHookItem toItem() {
-            UiScriptHookItem item = new UiScriptHookItem();
-            item.enabled = enabledCheck.isSelected();
-            item.language = (String) languageCombo.getSelectedItem();
-            item.scriptPath = pathField.getText() == null ? "" : pathField.getText().trim();
-            item.timeoutSec = (int) timeoutSpinner.getValue();
-            return item;
-        }
-    }
-
-    /**
-     * Provider 折叠卡片。
-     */
-    private static class ProviderCard extends JPanel {
-
-        private static final Color BORDER_NORMAL = new Color(215, 223, 233);
-        private static final Color BORDER_HOVER = new Color(74, 127, 205);
-        private static final Color HEADER_BG = new Color(246, 249, 253);
-
-        private final JLabel dragHandle = new JLabel("☰ 拖拽排序");
-        private final JLabel titleLabel = new JLabel("Provider");
-        private final JLabel summaryLabel = new JLabel(" ");
-        private final JButton collapseButton = new JButton("收起");
-        private final JButton copyButton = new JButton("复制");
-        private final JButton deleteButton = new JButton("删除");
-        private final JButton testButton = new JButton("连接测试");
-        private final JButton fetchModelsButton = new JButton("刷新模型");
-
-        private final JPanel bodyPanel = new JPanel(new GridBagLayout());
-
-        private final JTextField nameField = new JTextField();
-        private final JTextField urlField = new JTextField();
-        private final JPasswordField apiKeyField = new JPasswordField();
-        private final JComboBox<String> modelCombo = new JComboBox<>();
-        private final JSpinner concurrencySpinner = new JSpinner(new SpinnerNumberModel(8, 1, 8, 1));
-        private final JSpinner quotaSpinner = new JSpinner(new SpinnerNumberModel(1000, 1, 100000, 1));
-        private final JSpinner windowSpinner = new JSpinner(new SpinnerNumberModel(300, 1, 10080, 1));
-
-        private Runnable onRemove = () -> {
-        };
-        private Runnable onCopy = () -> {
-        };
-        private Runnable onTest = () -> {
-        };
-        private Runnable onFetchModels = () -> {
-        };
-
-        private boolean collapsed = false;
-        private boolean dragHover = false;
-
-        ProviderCard(UiProviderItem item) {
-            setLayout(new BorderLayout());
-            setBorder(BorderFactory.createLineBorder(BORDER_NORMAL, 1, true));
-            setBackground(CARD_BACKGROUND);
-            bodyPanel.setBackground(CARD_BACKGROUND);
-
-            dragHandle.setCursor(Cursor.getPredefinedCursor(Cursor.MOVE_CURSOR));
-            dragHandle.setForeground(new Color(68, 85, 102));
-            summaryLabel.setForeground(new Color(102, 110, 125));
-            applyNaturalText();
-
-            JPanel header = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 6));
-            header.setBackground(HEADER_BG);
-            header.add(dragHandle);
-            header.add(titleLabel);
-            header.add(summaryLabel);
-            header.add(collapseButton);
-            header.add(copyButton);
-            header.add(deleteButton);
-            header.add(testButton);
-            add(header, BorderLayout.NORTH);
-
-            initBody();
-            add(bodyPanel, BorderLayout.CENTER);
-            modelCombo.setEditable(true);
-            modelCombo.setToolTipText("推荐通过“刷新模型”自动发现，必要时可手动输入。");
-
-            fill(item);
-            bindActions();
-            bindSummarySync();
-        }
-
-        private void applyNaturalText() {
-            dragHandle.setText("\u62d6\u52a8\u6392\u5e8f");
-            collapseButton.setText("\u6536\u8d77");
-            copyButton.setText("\u590d\u5236");
-            deleteButton.setText("\u5220\u9664");
-            testButton.setText("\u8fde\u63a5\u6d4b\u8bd5");
-            fetchModelsButton.setText("\u5237\u65b0\u6a21\u578b");
-        }
-
-        JLabel getDragHandle() {
-            return dragHandle;
-        }
-
-        void setOnRemove(Runnable onRemove) {
-            this.onRemove = onRemove == null ? () -> {
-            } : onRemove;
-        }
-
-        void setOnCopy(Runnable onCopy) {
-            this.onCopy = onCopy == null ? () -> {
-            } : onCopy;
-        }
-
-        void setOnTest(Runnable onTest) {
-            this.onTest = onTest == null ? () -> {
-            } : onTest;
-        }
-
-        void setOnFetchModels(Runnable onFetchModels) {
-            this.onFetchModels = onFetchModels == null ? () -> {
-            } : onFetchModels;
-        }
-
-        void setDragHover(boolean hover) {
-            if (this.dragHover == hover) {
-                return;
-            }
-            this.dragHover = hover;
-            setBorder(BorderFactory.createLineBorder(hover ? BORDER_HOVER : BORDER_NORMAL, hover ? 2 : 1, true));
-        }
-
-        void setEditable(boolean editable) {
-            nameField.setEditable(editable);
-            urlField.setEditable(editable);
-            apiKeyField.setEditable(editable);
-            modelCombo.setEnabled(editable);
-            fetchModelsButton.setEnabled(editable);
-            concurrencySpinner.setEnabled(editable);
-            quotaSpinner.setEnabled(editable);
-            windowSpinner.setEnabled(editable);
-            collapseButton.setEnabled(editable);
-            copyButton.setEnabled(editable);
-            deleteButton.setEnabled(editable);
-            testButton.setEnabled(editable);
-        }
-
-        void setTesting(boolean testing) {
-            testButton.setEnabled(!testing);
-            testButton.setText(testing ? "测试中..." : "连接测试");
-        }
-
-        void setModelFetching(boolean fetching) {
-            fetchModelsButton.setEnabled(!fetching);
-            fetchModelsButton.setText(fetching ? "拉取中..." : "刷新模型");
-        }
-
-        void replaceModelItems(List<String> models) {
-            String current = currentModel();
-            modelCombo.removeAllItems();
-            for (String model : models) {
-                modelCombo.addItem(model);
-            }
-            if (current != null && !current.isBlank()) {
-                modelCombo.setSelectedItem(current);
-            } else if (modelCombo.getItemCount() > 0) {
-                modelCombo.setSelectedIndex(0);
-            }
-            updateSummary();
-        }
-
-        UiProviderItem toUiProviderItem() {
-            UiProviderItem item = new UiProviderItem();
-            item.name = nameField.getText().trim();
-            item.url = urlField.getText().trim();
-            item.apiKey = readApiKey();
-            item.model = currentModel();
-            item.concurrency = (int) concurrencySpinner.getValue();
-            item.quota = (int) quotaSpinner.getValue();
-            item.windowMinutes = (int) windowSpinner.getValue();
-            return item;
-        }
-
-        ProviderConfig toProviderConfig() {
-            String name = required(nameField.getText(), "name");
-            String url = required(urlField.getText(), "url");
-            String apiKey = required(readApiKey(), "apiKey");
-            String model = required(currentModel(), "model");
-            return new ProviderConfig(
-                    name,
-                    URI.create(url),
-                    apiKey,
-                    model,
-                    (int) concurrencySpinner.getValue(),
-                    (int) quotaSpinner.getValue(),
-                    (int) windowSpinner.getValue());
-        }
-
-        ProviderConfig toProviderConfigForModelDiscovery() {
-            String model = currentModel();
-            if (model == null || model.isBlank()) {
-                model = "placeholder-model";
-            }
-            return new ProviderConfig(
-                    required(nameField.getText(), "name"),
-                    URI.create(required(urlField.getText(), "url")),
-                    required(readApiKey(), "apiKey"),
-                    model,
-                    (int) concurrencySpinner.getValue(),
-                    (int) quotaSpinner.getValue(),
-                    (int) windowSpinner.getValue());
-        }
-
-        private void initBody() {
-            GridBagConstraints c = new GridBagConstraints();
-            c.insets = new Insets(4, 6, 4, 6);
-            c.fill = GridBagConstraints.HORIZONTAL;
-
-            int row = 0;
-            c.gridx = 0;
-            c.gridy = row;
-            c.weightx = 0;
-            bodyPanel.add(new JLabel("name"), c);
-            c.gridx = 1;
-            c.weightx = 0.25;
-            bodyPanel.add(nameField, c);
-            c.gridx = 2;
-            c.weightx = 0;
-            bodyPanel.add(new JLabel("url"), c);
-            c.gridx = 3;
-            c.weightx = 0.75;
-            bodyPanel.add(urlField, c);
-
-            row++;
-            c.gridy = row;
-            c.gridx = 0;
-            c.weightx = 0;
-            bodyPanel.add(new JLabel("apiKey"), c);
-            c.gridx = 1;
-            c.weightx = 0.5;
-            bodyPanel.add(apiKeyField, c);
-            c.gridx = 2;
-            c.weightx = 0;
-            bodyPanel.add(new JLabel("model"), c);
-            c.gridx = 3;
-            c.weightx = 0.5;
-
-            JPanel modelPanel = new JPanel(new BorderLayout(6, 0));
-            modelPanel.add(modelCombo, BorderLayout.CENTER);
-            modelPanel.add(fetchModelsButton, BorderLayout.EAST);
-            bodyPanel.add(modelPanel, c);
-
-            row++;
-            c.gridy = row;
-            c.gridx = 0;
-            c.weightx = 0;
-            bodyPanel.add(new JLabel("concurrency"), c);
-            c.gridx = 1;
-            c.weightx = 0.2;
-            bodyPanel.add(concurrencySpinner, c);
-            c.gridx = 2;
-            c.weightx = 0;
-            bodyPanel.add(new JLabel("quota / window(min)"), c);
-            c.gridx = 3;
-            c.weightx = 0.8;
-
-            JPanel right = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 0));
-            right.add(quotaSpinner);
-            right.add(windowSpinner);
-            bodyPanel.add(right, c);
-        }
-
-        private void bindActions() {
-            collapseButton.addActionListener(e -> toggleCollapse());
-            copyButton.addActionListener(e -> onCopy.run());
-            deleteButton.addActionListener(e -> onRemove.run());
-            testButton.addActionListener(e -> onTest.run());
-            fetchModelsButton.addActionListener(e -> onFetchModels.run());
-            modelCombo.addActionListener(e -> updateSummary());
-        }
-
-        private void bindSummarySync() {
-            DocumentListener listener = new DocumentListener() {
-                @Override
-                public void insertUpdate(DocumentEvent e) {
-                    updateSummary();
-                }
-
-                @Override
-                public void removeUpdate(DocumentEvent e) {
-                    updateSummary();
-                }
-
-                @Override
-                public void changedUpdate(DocumentEvent e) {
-                    updateSummary();
-                }
-            };
-            nameField.getDocument().addDocumentListener(listener);
-            urlField.getDocument().addDocumentListener(listener);
-        }
-
-        private void toggleCollapse() {
-            collapsed = !collapsed;
-            bodyPanel.setVisible(!collapsed);
-            collapseButton.setText(collapsed ? "展开" : "收起");
-            revalidate();
-            repaint();
-        }
-
-        private void fill(UiProviderItem item) {
-            UiProviderItem source = item == null ? new UiProviderItem() : item;
-            nameField.setText(source.name == null ? "" : source.name);
-            urlField.setText(source.url == null ? "" : source.url);
-            apiKeyField.setText(source.apiKey == null ? "" : source.apiKey);
-            modelCombo.removeAllItems();
-            modelCombo.addItem(source.model == null || source.model.isBlank() ? "" : source.model);
-            modelCombo.setSelectedItem(source.model == null ? "" : source.model);
-            concurrencySpinner.setValue(Math.max(1, Math.min(8, source.concurrency <= 0 ? 8 : source.concurrency)));
-            quotaSpinner.setValue(source.quota <= 0 ? 1000 : source.quota);
-            windowSpinner.setValue(source.windowMinutes <= 0 ? 300 : source.windowMinutes);
-            updateSummary();
-        }
-
-        private void updateSummary() {
-            String name = nameField.getText() == null ? "" : nameField.getText().trim();
-            String model = currentModel();
-            String url = urlField.getText() == null ? "" : urlField.getText().trim();
-            titleLabel.setText(name.isBlank() ? "Provider" : name);
-            summaryLabel.setText("[" + (model.isBlank() ? "no-model" : model) + "] " + trimMiddle(url, 36));
-        }
-
-        private String trimMiddle(String text, int maxLen) {
-            if (text == null || text.length() <= maxLen) {
-                return text == null ? "" : text;
-            }
-            int head = Math.max(6, maxLen / 2 - 2);
-            int tail = Math.max(6, maxLen - head - 3);
-            return text.substring(0, head) + "..." + text.substring(text.length() - tail);
-        }
-
-        private String currentModel() {
-            Object selected = modelCombo.getEditor().getItem();
-            if (selected == null) {
-                selected = modelCombo.getSelectedItem();
-            }
-            return selected == null ? "" : selected.toString().trim();
-        }
-
-        private String readApiKey() {
-            char[] chars = apiKeyField.getPassword();
-            if (chars == null || chars.length == 0) {
-                return "";
-            }
-            try {
-                return new String(chars).trim();
-            } finally {
-                Arrays.fill(chars, '\0');
-            }
-        }
-
-        private String required(String value, String field) {
-            String ret = value == null ? "" : value.trim();
-            if (ret.isEmpty()) {
-                throw new IllegalArgumentException(field + " 不能为空");
-            }
-            return ret;
-        }
-    }
 }
