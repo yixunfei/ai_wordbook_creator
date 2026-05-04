@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.wordbookgen.core.PauseController;
 import com.wordbookgen.core.model.JobConfig;
 import com.wordbookgen.core.model.ProviderConfig;
 import com.wordbookgen.core.model.ScriptHookConfig;
@@ -23,6 +24,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
@@ -32,10 +35,18 @@ import java.util.function.Consumer;
  */
 public class ScriptHookExecutor {
 
+    static final int MAX_HOOK_OUTPUT_BYTES = 1024 * 1024;
+
     private final ObjectMapper mapper;
+    private final ExecutorService streamReaderExecutor;
 
     public ScriptHookExecutor(ObjectMapper mapper) {
         this.mapper = mapper;
+        this.streamReaderExecutor = Executors.newCachedThreadPool(r -> {
+            Thread t = new Thread(r, "wordbook-hook-stream-reader");
+            t.setDaemon(true);
+            return t;
+        });
     }
 
     public HookPromptResult applyPreRequestHook(
@@ -45,6 +56,7 @@ public class ScriptHookExecutor {
             List<String> words,
             String systemPrompt,
             String userPrompt,
+            PauseController pauseController,
             Consumer<String> log
     ) throws ScriptHookException {
         ScriptHookConfig hook = jobConfig.preRequestHook();
@@ -67,7 +79,7 @@ public class ScriptHookExecutor {
             wordsNode.add(word);
         }
 
-        JsonNode response = executeHook(hook, payload, log);
+        JsonNode response = executeHook(hook, payload, pauseController, log);
         if (response == null || !response.isObject()) {
             return new HookPromptResult(systemPrompt, userPrompt);
         }
@@ -83,6 +95,7 @@ public class ScriptHookExecutor {
             int batchIndex,
             int statusCode,
             String rawResponse,
+            PauseController pauseController,
             Consumer<String> log
     ) throws ScriptHookException {
         ScriptHookConfig hook = jobConfig.postResponseHook();
@@ -98,7 +111,7 @@ public class ScriptHookExecutor {
         payload.put("statusCode", statusCode);
         payload.put("rawResponse", rawResponse == null ? "" : rawResponse);
 
-        JsonNode response = executeHook(hook, payload, log);
+        JsonNode response = executeHook(hook, payload, pauseController, log);
         if (response == null || !response.isObject()) {
             return rawResponse;
         }
@@ -110,6 +123,7 @@ public class ScriptHookExecutor {
             ProviderConfig providerConfig,
             int batchIndex,
             Map<String, JsonNode> entries,
+            PauseController pauseController,
             Consumer<String> log
     ) throws ScriptHookException {
         ScriptHookConfig hook = jobConfig.postParsedHook();
@@ -124,7 +138,7 @@ public class ScriptHookExecutor {
         payload.put("batchIndex", batchIndex);
         payload.set("entries", mapper.valueToTree(entries));
 
-        JsonNode response = executeHook(hook, payload, log);
+        JsonNode response = executeHook(hook, payload, pauseController, log);
         if (response == null || !response.isObject()) {
             return entries;
         }
@@ -136,7 +150,13 @@ public class ScriptHookExecutor {
         });
     }
 
-    private JsonNode executeHook(ScriptHookConfig hook, ObjectNode payload, Consumer<String> log) throws ScriptHookException {
+    private JsonNode executeHook(
+            ScriptHookConfig hook,
+            ObjectNode payload,
+            PauseController pauseController,
+            Consumer<String> log
+    ) throws ScriptHookException {
+        ensureNotStopping(pauseController);
         List<String> command = buildCommand(hook);
         if (log != null) {
             log.accept("[hook] execute stage=" + payload.path("stage").asText() + ", command=" + String.join(" ", command));
@@ -157,10 +177,12 @@ public class ScriptHookExecutor {
             throw new ScriptHookException("failed to start hook process: " + ex.getMessage(), ex);
         }
 
-        CompletableFuture<String> stdoutFuture = CompletableFuture.supplyAsync(
-                () -> readStreamSafely(process.getInputStream()));
-        CompletableFuture<String> stderrFuture = CompletableFuture.supplyAsync(
-                () -> readStreamSafely(process.getErrorStream()));
+        CompletableFuture<HookStreamResult> stdoutFuture = CompletableFuture.supplyAsync(
+                () -> readStreamSafely(process.getInputStream(), "stdout"),
+                streamReaderExecutor);
+        CompletableFuture<HookStreamResult> stderrFuture = CompletableFuture.supplyAsync(
+                () -> readStreamSafely(process.getErrorStream(), "stderr"),
+                streamReaderExecutor);
 
         try (OutputStream stdin = process.getOutputStream()) {
             byte[] input = mapper.writeValueAsBytes(payload);
@@ -171,37 +193,46 @@ public class ScriptHookExecutor {
             throw new ScriptHookException("failed to write hook input: " + ex.getMessage(), ex);
         }
 
-        boolean finished;
-        try {
-            finished = process.waitFor(Math.max(1, hook.timeoutSec()), TimeUnit.SECONDS);
-        } catch (InterruptedException ex) {
-            Thread.currentThread().interrupt();
+        HookWaitResult waitResult = waitForHook(process, Math.max(1, hook.timeoutSec()), pauseController);
+        if (waitResult == HookWaitResult.STOPPED) {
             destroyProcess(process);
-            throw new ScriptHookException("hook interrupted", ex);
+            stdoutFuture.cancel(true);
+            stderrFuture.cancel(true);
+            throw new ScriptHookException("hook canceled because job is stopping");
         }
-
-        if (!finished) {
+        if (waitResult == HookWaitResult.TIMED_OUT) {
             destroyProcess(process);
-            String stderr = awaitStream(stderrFuture, 2, TimeUnit.SECONDS);
-            String suffix = stderr.isBlank() ? "" : ", stderr=" + summarize(stderr);
+            stdoutFuture.cancel(true);
+            stderrFuture.cancel(true);
+            HookStreamResult stderr = awaitStream(stderrFuture, 2, TimeUnit.SECONDS);
+            String stderrText = stderr.text();
+            String suffix = stderrText.isBlank() ? "" : ", stderr=" + summarize(stderrText);
             throw new ScriptHookException("hook timed out after " + hook.timeoutSec() + "s" + suffix);
         }
 
-        String stdout = awaitStream(stdoutFuture, 2, TimeUnit.SECONDS);
-        String stderr = awaitStream(stderrFuture, 2, TimeUnit.SECONDS);
+        HookStreamResult stdout = awaitStream(stdoutFuture, 2, TimeUnit.SECONDS);
+        HookStreamResult stderr = awaitStream(stderrFuture, 2, TimeUnit.SECONDS);
+        if (stdout.limitExceeded()) {
+            throw new ScriptHookException("hook stdout exceeded " + MAX_HOOK_OUTPUT_BYTES + " bytes");
+        }
+        if (stderr.limitExceeded()) {
+            throw new ScriptHookException("hook stderr exceeded " + MAX_HOOK_OUTPUT_BYTES + " bytes");
+        }
+        String stdoutText = stdout.text();
+        String stderrText = stderr.text();
         int exitCode = process.exitValue();
         if (exitCode != 0) {
-            throw new ScriptHookException("hook exit code " + exitCode + ", stderr=" + summarize(stderr));
+            throw new ScriptHookException("hook exit code " + exitCode + ", stderr=" + summarize(stderrText));
         }
 
-        if (stdout == null || stdout.isBlank()) {
+        if (stdoutText == null || stdoutText.isBlank()) {
             return null;
         }
 
         try {
-            return mapper.readTree(stdout);
+            return mapper.readTree(stdoutText);
         } catch (IOException ex) {
-            throw new ScriptHookException("hook output is not valid json: " + summarize(stdout), ex);
+            throw new ScriptHookException("hook output is not valid json: " + summarize(stdoutText), ex);
         }
     }
 
@@ -285,19 +316,80 @@ public class ScriptHookExecutor {
         }
     }
 
-    private String readStreamSafely(InputStream stream) {
-        try {
-            return new String(stream.readAllBytes(), StandardCharsets.UTF_8);
-        } catch (IOException ex) {
-            return "";
+    private HookWaitResult waitForHook(
+            Process process,
+            int timeoutSec,
+            PauseController pauseController
+    ) throws ScriptHookException {
+        long deadlineNanos = System.nanoTime() + TimeUnit.SECONDS.toNanos(timeoutSec);
+        while (true) {
+            if (pauseController != null && pauseController.isStopRequested()) {
+                return HookWaitResult.STOPPED;
+            }
+            try {
+                if (process.waitFor(250L, TimeUnit.MILLISECONDS)) {
+                    return HookWaitResult.FINISHED;
+                }
+            } catch (InterruptedException ex) {
+                Thread.currentThread().interrupt();
+                destroyProcess(process);
+                throw new ScriptHookException("hook interrupted", ex);
+            }
+            if (System.nanoTime() >= deadlineNanos) {
+                return HookWaitResult.TIMED_OUT;
+            }
         }
     }
 
-    private String awaitStream(CompletableFuture<String> future, long timeout, TimeUnit unit) {
+    private void ensureNotStopping(PauseController pauseController) throws ScriptHookException {
+        if (pauseController != null && pauseController.isStopRequested()) {
+            throw new ScriptHookException("hook canceled because job is stopping");
+        }
+    }
+
+    private HookStreamResult readStreamSafely(InputStream stream, String streamName) {
+        try {
+            LimitedBytes bytes = readLimited(stream, MAX_HOOK_OUTPUT_BYTES);
+            return new HookStreamResult(
+                    new String(bytes.bytes(), StandardCharsets.UTF_8),
+                    bytes.limitExceeded());
+        } catch (IOException ex) {
+            return new HookStreamResult("__HOOK_STREAM_ERROR__ " + streamName + ": " + ex.getMessage(), false);
+        }
+    }
+
+    private LimitedBytes readLimited(InputStream stream, int maxBytes) throws IOException {
+        byte[] buffer = new byte[8192];
+        byte[] output = new byte[Math.min(maxBytes, 8192)];
+        int total = 0;
+        boolean limitExceeded = false;
+        while (true) {
+            int read = stream.read(buffer);
+            if (read < 0) {
+                byte[] exact = new byte[total];
+                System.arraycopy(output, 0, exact, 0, total);
+                return new LimitedBytes(exact, limitExceeded);
+            }
+            int required = total + read;
+            if (required > output.length) {
+                byte[] expanded = new byte[Math.min(maxBytes, Math.max(required, output.length * 2))];
+                System.arraycopy(output, 0, expanded, 0, total);
+                output = expanded;
+            }
+            int copyLength = Math.min(read, output.length - total);
+            System.arraycopy(buffer, 0, output, total, copyLength);
+            total += copyLength;
+            if (required > maxBytes) {
+                limitExceeded = true;
+            }
+        }
+    }
+
+    private HookStreamResult awaitStream(CompletableFuture<HookStreamResult> future, long timeout, TimeUnit unit) {
         try {
             return future.get(timeout, unit);
         } catch (Exception ex) {
-            return "";
+            return new HookStreamResult("", false);
         }
     }
 
@@ -325,6 +417,18 @@ public class ScriptHookExecutor {
     }
 
     public record HookPromptResult(String systemPrompt, String userPrompt) {
+    }
+
+    private record LimitedBytes(byte[] bytes, boolean limitExceeded) {
+    }
+
+    private record HookStreamResult(String text, boolean limitExceeded) {
+    }
+
+    private enum HookWaitResult {
+        FINISHED,
+        TIMED_OUT,
+        STOPPED
     }
 
     public static class ScriptHookException extends Exception {

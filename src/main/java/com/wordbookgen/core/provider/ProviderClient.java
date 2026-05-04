@@ -145,6 +145,7 @@ public class ProviderClient {
                     task.words(),
                     systemPrompt,
                     userPrompt,
+                    pauseController,
                     log);
 
             Duration requestTimeout = effectiveRequestTimeout(jobConfig.requestTimeout(), task.words().size());
@@ -169,6 +170,7 @@ public class ProviderClient {
                     task.index(),
                     status,
                     body,
+                    pauseController,
                     log);
             debugLog(log, jobConfig.debugMode(),
                     "HTTP response after POST_RESPONSE hook (batch=" + task.index() + ")", body);
@@ -205,6 +207,7 @@ public class ProviderClient {
                     config,
                     task.index(),
                     entries,
+                    pauseController,
                     log);
             outputParser.validatePostParsedHookResult(task, entries);
             return entries;
@@ -298,6 +301,7 @@ public class ProviderClient {
                 task.index(),
                 status,
                 body,
+                pauseController,
                 log);
         debugLog(log, jobConfig.debugMode(),
                 "HTTP repair response after POST_RESPONSE hook (batch=" + task.index() + ")", body);
@@ -359,6 +363,7 @@ public class ProviderClient {
                     task.index(),
                     status,
                     body,
+                    pauseController,
                     log);
             ensureSuccessfulResponse(response, body);
 
